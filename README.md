@@ -4,6 +4,8 @@ Windows-приложение для **локальной** подписи PDF и
 
 Готовый `SignPdf.exe` портативный: копируете файл на другой компьютер и запускаете. .NET ставить не нужно.
 
+Готовая сборка: [Releases](https://github.com/ibuben/SignPdf/releases) — скачайте `SignPdf.exe`.
+
 ## Что нужно
 
 1. Windows 10 (1809+) / 11 x64.
