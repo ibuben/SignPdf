@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>SignPdf.App</RootNamespace>
+    <AssemblyName>SignPdf</AssemblyName>
+    <ApplicationTitle>Подпись PDF — E-IMZO</ApplicationTitle>
+    <Product>Подпись PDF — E-IMZO</Product>
+    <Description>Локальная подпись и проверка PDF через клиент E-IMZO</Description>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="icon.png" />
+    <Resource Include="icon-small.png" />
+    <Resource Include="pdf.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SignPdf.Eimzo\SignPdf.Eimzo.csproj" />
+    <ProjectReference Include="..\SignPdf.Pdf\SignPdf.Pdf.csproj" />
+  </ItemGroup>
+</Project>

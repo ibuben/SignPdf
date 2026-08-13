@@ -1,0 +1,21 @@
+﻿# Build
+bin/
+obj/
+*.user
+*.suo
+.vs/
+publish/
+*.nupkg
+
+# Local SDK (optional)
+.dotnet/
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.idea/
+*.rsuser
+*.userosscache
+
+# Generated icon previews
+tools/icon-preview/

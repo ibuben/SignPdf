@@ -1,0 +1,346 @@
+<Window x:Class="SignPdf.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SignPdf.App"
+        Title="{local:Loc window_title}"
+        Height="820" Width="960"
+        MinHeight="700" MinWidth="820"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BgBrush}"
+        FontFamily="Segoe UI"
+        Foreground="{DynamicResource TextBrush}"
+        Icon="pack://application:,,,/icon-small.png">
+    <Window.Resources>
+        <local:InverseBooleanConverter x:Key="InverseBool"/>
+        <local:BooleanToVisibilityConverter x:Key="Vis"/>
+        <local:BooleanToVisibilityConverter x:Key="VisInvert" Invert="True"/>
+        <local:OkToBrushConverter x:Key="OkBrushConv"/>
+        <local:OkToGlyphConverter x:Key="OkGlyphConv"/>
+        <local:SignatureStatusLocConverter x:Key="StatusLoc"/>
+        <local:CertificateCaptionConverter x:Key="CertCaption"/>
+        <DataTemplate x:Key="StatusMark">
+            <Grid Width="22" Height="22">
+                <Ellipse Fill="{Binding Converter={StaticResource OkBrushConv}}"/>
+                <TextBlock Text="{Binding Converter={StaticResource OkGlyphConv}}"
+                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           Foreground="White"
+                           FontSize="11"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+            </Grid>
+        </DataTemplate>
+        <Style x:Key="CellText" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="6,0"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+        <Style x:Key="CellTextWrap" TargetType="TextBlock" BasedOn="{StaticResource CellText}">
+            <Setter Property="TextWrapping" Value="WrapWithOverflow"/>
+            <Setter Property="TextTrimming" Value="None"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="24,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock FontSize="20" FontWeight="SemiBold" Text="{local:Loc app_title}"/>
+                    <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource MutedBrush}"
+                               Text="{local:Loc app_subtitle}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,8">
+                    <ComboBox Width="128"
+                              ItemsSource="{Binding Source={x:Static local:Loc.Instance}, Path=Languages}"
+                              DisplayMemberPath="Title"
+                              SelectedValuePath="Code"
+                              SelectedValue="{Binding Source={x:Static local:Loc.Instance}, Path=Language, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Style="{StaticResource GhostButton}" Width="28" Height="28" Padding="0" Margin="8,0,0,0"
+                            Click="ThemeClick"
+                            ToolTip="{Binding Source={x:Static local:Theme.Instance}, Path=ToggleHint}">
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   Text="{Binding Source={x:Static local:Theme.Instance}, Path=Icon}"/>
+                    </Button>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Ellipse Width="10" Height="10" Margin="0,0,8,0" VerticalAlignment="Center">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{DynamicResource DangerBrush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding EimzoConnected}" Value="True">
+                                            <Setter Property="Fill" Value="{DynamicResource OkBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock Text="{Binding EimzoStatus}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Button Style="{StaticResource GhostButton}" Width="28" Height="28" Padding="0"
+                                Margin="8,0,0,0" VerticalAlignment="Center"
+                                Command="{Binding ConnectCommand}" ToolTip="{local:Loc refresh}">
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Text="&#xE72C;"
+                                       FontSize="13" Foreground="{DynamicResource AccentBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Button>
+                        <Border Width="18" Height="18" CornerRadius="9" Margin="8,0,0,0"
+                                BorderBrush="{DynamicResource MutedBrush}" BorderThickness="1"
+                                VerticalAlignment="Center" Cursor="Help"
+                                Visibility="{Binding EimzoConnected, Converter={StaticResource VisInvert}}">
+                            <Border.ToolTip>
+                                <ToolTip MaxWidth="340">
+                                    <TextBlock Text="{local:Loc eimzo_help}" TextWrapping="Wrap"/>
+                                </ToolTip>
+                            </Border.ToolTip>
+                            <TextBlock Text="?" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource MutedBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="{Binding EimzoVersion}" Foreground="{DynamicResource MutedBrush}"
+                               HorizontalAlignment="Right" FontSize="12" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Padding="24,12" Background="{DynamicResource ChromeBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="{local:Loc associate_pdf}"
+                        Command="{Binding AssociatePdfCommand}"/>
+                <TextBlock VerticalAlignment="Center">
+                    <Hyperlink NavigateUri="https://exunity.uz/?ref=docsigner"
+                               RequestNavigate="CreditLinkNavigate"
+                               Foreground="{DynamicResource MutedBrush}"
+                               TextDecorations="None">
+                        <Run Text="{local:Loc credit}"/>
+                    </Hyperlink>
+                </TextBlock>
+            </DockPanel>
+        </Border>
+
+        <TabControl Margin="20">
+            <TabItem Header="{local:Loc tab_sign}">
+                <Grid AllowDrop="True"
+                      PreviewDragOver="SignPdfDragOver"
+                      PreviewDragLeave="SignPdfDragLeave"
+                      Drop="SignPdfDrop">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                                <TextBlock Text="{local:Loc certificate}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                <ComboBox ItemsSource="{Binding Certificates}"
+                                          SelectedItem="{Binding SelectedCertificate}"
+                                          IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBool}}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock>
+                                                <TextBlock.Text>
+                                                    <MultiBinding Converter="{StaticResource CertCaption}">
+                                                        <Binding />
+                                                        <Binding Source="{x:Static local:Loc.Instance}" Path="Version"/>
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+
+                                <TextBlock Text="{local:Loc pdf_file}" FontWeight="SemiBold" Margin="0,18,0,8"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding PdfPath, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Column="1" Style="{StaticResource GhostButton}" Content="{local:Loc browse}"
+                                            Command="{Binding BrowsePdfCommand}" Margin="8,0,0,0"/>
+                                    <Button Grid.Column="2" Style="{StaticResource GhostButton}" Content="{local:Loc preview}"
+                                            Command="{Binding PreviewSignCommand}" Margin="8,0,0,0"/>
+                                </Grid>
+                                <TextBlock Margin="0,6,0,0" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                                           Text="{local:Loc drop_pdf_hint}"/>
+
+                                <TextBlock Text="{local:Loc output}" FontWeight="SemiBold" Margin="0,18,0,8"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Column="1" Style="{StaticResource GhostButton}" Content="{local:Loc browse}"
+                                            Command="{Binding BrowseOutputCommand}" Margin="8,0,0,0"/>
+                                </Grid>
+
+                                <CheckBox Margin="0,16,0,0" IsChecked="{Binding ShowStamp}"
+                                          Content="{local:Loc stamp_checkbox}"/>
+
+                                <Button Margin="0,20,0,0" HorizontalAlignment="Left" MinWidth="160"
+                                        Content="{local:Loc sign}" Command="{Binding SignCommand}"/>
+
+                                <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" Text="{Binding SignMessage}"/>
+                            </StackPanel>
+                </ScrollViewer>
+                <Border x:Name="SignDropOverlay" Visibility="Collapsed" IsHitTestVisible="False"
+                        Background="{DynamicResource GhostHoverBrush}" Opacity="0.94"
+                        BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2"
+                        CornerRadius="8" Margin="4">
+                    <TextBlock Text="{local:Loc drop_pdf}" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{DynamicResource AccentBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="{local:Loc tab_verify}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                            <TextBlock Text="{local:Loc pdf_file}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding VerifyPdfPath, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Button Grid.Column="1" Style="{StaticResource GhostButton}" Content="{local:Loc browse}"
+                                        Command="{Binding BrowseVerifyCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="2" Style="{StaticResource GhostButton}" Content="{local:Loc preview}"
+                                        Command="{Binding PreviewVerifyCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="3" Content="{local:Loc verify}" Command="{Binding VerifyCommand}" Margin="8,0,0,0"/>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Grid Margin="0,0,10,0" VerticalAlignment="Center"
+                                      Visibility="{Binding HasVerificationResults, Converter={StaticResource Vis}}">
+                                    <Grid Width="22" Height="22">
+                                        <Ellipse Fill="{Binding VerifyAllOk, Converter={StaticResource OkBrushConv}}"/>
+                                        <TextBlock Text="{Binding VerifyAllOk, Converter={StaticResource OkGlyphConv}}"
+                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   Foreground="White"
+                                                   FontSize="11"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Grid>
+                                <TextBlock TextWrapping="Wrap" Text="{Binding VerifySummary}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                    </StackPanel>
+
+                    <DataGrid ItemsSource="{Binding VerificationResults}"
+                              SelectedItem="{Binding SelectedVerification}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              BorderBrush="{DynamicResource LineBrush}"
+                              Background="{DynamicResource CardBrush}"
+                              RowBackground="{DynamicResource CardBrush}"
+                              AlternatingRowBackground="{DynamicResource GridAltBrush}"
+                              Foreground="{DynamicResource TextBrush}"
+                              CanUserAddRows="False"
+                              CanUserResizeRows="False"
+                              CanUserResizeColumns="True"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              MouseDoubleClick="VerificationRowDoubleClick">
+                        <DataGrid.CellStyle>
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="BorderThickness" Value="0"/>
+                                <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="DataGridCell">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                                    Padding="6,4"
+                                                    SnapsToDevicePixels="True">
+                                                <ContentPresenter VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource GridSelectBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.CellStyle>
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="MinHeight" Value="44"/>
+                                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Binding="{Binding FieldName}" Width="120" MinWidth="90"
+                                                ElementStyle="{StaticResource CellTextWrap}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="{local:Loc col_field}"/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridTemplateColumn Width="200" MinWidth="160">
+                                <DataGridTemplateColumn.Header>
+                                    <TextBlock Text="{local:Loc col_status}"/>
+                                </DataGridTemplateColumn.Header>
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <ContentPresenter Content="{Binding IsOk}"
+                                                              ContentTemplate="{StaticResource StatusMark}"
+                                                              VerticalAlignment="Center"/>
+                                            <TextBlock Margin="8,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="WrapWithOverflow">
+                                                <TextBlock.Text>
+                                                    <MultiBinding Converter="{StaticResource StatusLoc}">
+                                                        <Binding Path="Status"/>
+                                                        <Binding Path="FollowedByLaterSignature"/>
+                                                        <Binding Source="{x:Static local:Loc.Instance}" Path="Version"/>
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Binding="{Binding SignerName}" Width="*" MinWidth="180"
+                                                ElementStyle="{StaticResource CellTextWrap}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="{local:Loc col_signer}"/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Binding="{Binding Algorithm}" Width="180" MinWidth="140"
+                                                ElementStyle="{StaticResource CellTextWrap}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="{local:Loc col_algorithm}"/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Binding="{Binding SignedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="130" MinWidth="120"
+                                                ElementStyle="{StaticResource CellText}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="{local:Loc col_signed}"/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Binding="{Binding ValidTo, StringFormat=dd.MM.yyyy}" Width="100" MinWidth="90"
+                                                ElementStyle="{StaticResource CellText}">
+                                <DataGridTextColumn.Header>
+                                    <TextBlock Text="{local:Loc col_key_until}"/>
+                                </DataGridTextColumn.Header>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>
