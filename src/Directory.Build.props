@@ -1,4 +1,9 @@
 <Project>
+  <PropertyGroup>
+    <Copyright>Copyright (c) 2026 eXUnity LAB</Copyright>
+    <Company>eXUnity LAB</Company>
+    <Authors>eXUnity LAB</Authors>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>

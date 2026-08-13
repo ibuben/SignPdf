@@ -10,6 +10,9 @@
     <ApplicationTitle>Подпись PDF — E-IMZO</ApplicationTitle>
     <Product>Подпись PDF — E-IMZO</Product>
     <Description>Локальная подпись и проверка PDF через клиент E-IMZO</Description>
+    <Copyright>Copyright (c) 2026 eXUnity LAB</Copyright>
+    <Company>eXUnity LAB</Company>
+    <Authors>eXUnity LAB</Authors>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
