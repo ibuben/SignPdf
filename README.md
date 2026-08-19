@@ -41,7 +41,7 @@ dotnet publish src/SignPdf.App -c Release -r win-x64 --self-contained true -o pu
 
 ## Проверка подписи
 
-Вкладка «Проверить» сначала просит локальный E-IMZO разобрать detached PKCS#7 (`get_pkcs7_detached_info`) — так проверяются ключи O'zDSt / GOST, которые iText и Adobe Reader не понимают. В **E-IMZO 6.x** этой функции уже нет: приложение тогда разбирает CMS само и проверяет цепочку сертификатов через `x509.verify_certificate`. Если E-IMZO недоступен, остаётся разбор CMS через iText/BouncyCastle.
+Вкладка «Проверить» разбирает detached PKCS#7 локально (O'zDSt / GOST) и подтверждает цепочку сертификатов через локальный E-IMZO (`x509.verify_certificate`). Если E-IMZO недоступен, остаётся разбор CMS через iText/BouncyCastle.
 
 Это **криптопроверка файла**, не онлайн-статус сертификата в реестре PKI Узбекистана (для этого нужен отдельный E-IMZO-SERVER).
 

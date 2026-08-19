@@ -2,8 +2,10 @@ using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.Asn1.CryptoPro;
 using Org.BouncyCastle.Asn1.Pkcs;
 using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Asn1.X9;
 using Org.BouncyCastle.Cms;
 using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math;
@@ -46,7 +48,7 @@ public sealed class CmsLocalInspect
         bool? integrity = null;
         if (signer is not null && cert is not null)
         {
-            integrity = TryVerify(signer, cert, signedBytes);
+            integrity = TryVerify(signer, cert, signedBytes, cmsBytes);
         }
 
         DateTime? signedAt = null;
@@ -122,16 +124,21 @@ public sealed class CmsLocalInspect
         return null;
     }
 
-    private static bool? TryVerify(SignerInformation signer, BcX509 cert, byte[] signedBytes)
+    private static bool? TryVerify(SignerInformation signer, BcX509 cert, byte[] signedBytes, byte[] cmsBytes)
     {
         try
         {
-            return signer.Verify(cert);
+            if (signer.Verify(cert))
+            {
+                return true;
+            }
         }
         catch
         {
-            return OzdstCms.TryVerify(signer, cert, signedBytes);
+            // O'zDSt OIDs are unknown to BouncyCastle; verify locally.
         }
+
+        return OzdstCms.TryVerify(signer, cert, signedBytes, cmsBytes);
     }
 
     private static string FirstNonEmpty(params string?[] values)
@@ -150,7 +157,7 @@ public sealed class CmsLocalInspect
 
 internal static class OzdstCms
 {
-    private static readonly Asn1ObjectIdentifier[] CryptoProCurveOids =
+    private static readonly DerObjectIdentifier[] CryptoProCurveOids =
     {
         CryptoProObjectIdentifiers.GostR3410x2001CryptoProA,
         CryptoProObjectIdentifiers.GostR3410x2001CryptoProB,
@@ -159,36 +166,99 @@ internal static class OzdstCms
         CryptoProObjectIdentifiers.GostR3410x2001CryptoProXchB,
     };
 
-    public static bool? TryVerify(SignerInformation signer, BcX509 cert, byte[] signedBytes)
+    public static bool? TryVerify(SignerInformation signer, BcX509 cert, byte[] signedBytes, byte[] cmsBytes)
     {
         try
         {
-            var signedAttr = GetEncodedSignedAttributes(signer);
             var signature = signer.GetSignature();
             if (signature.Length == 0)
             {
                 return null;
             }
 
-            var signedOver = signedAttr is { Length: > 0 } ? signedAttr : signedBytes;
-            foreach (var key in EnumeratePublicKeys(cert))
+            var payloads = EnumeratePayloads(signer, signedBytes, cmsBytes).ToArray();
+            var keys = EnumeratePublicKeys(cert).ToArray();
+            if (keys.Length == 0)
             {
-                if (VerifyGostSignature(key, signedOver, signature))
+                return null;
+            }
+
+            var attrVerified = false;
+            var digestMismatch = false;
+            foreach (var payload in payloads)
+            {
+                foreach (var key in keys)
                 {
-                    if (signedAttr is { Length: > 0 } && MessageDigestMatches(signer, signedBytes) == false)
+                    if (!VerifyGostSignature(key, payload.Bytes, signature))
                     {
-                        return false;
+                        continue;
                     }
 
-                    return true;
+                    if (!payload.IsSignedAttributes)
+                    {
+                        return true;
+                    }
+
+                    attrVerified = true;
+                    var digest = MessageDigestMatches(signer, signedBytes);
+                    if (digest == true)
+                    {
+                        return true;
+                    }
+
+                    if (digest == false)
+                    {
+                        digestMismatch = true;
+                    }
                 }
             }
 
-            return null;
+            if (digestMismatch)
+            {
+                return false;
+            }
+
+            return attrVerified ? true : null;
         }
         catch
         {
             return null;
+        }
+    }
+
+    private static IEnumerable<(byte[] Bytes, bool IsSignedAttributes)> EnumeratePayloads(
+        SignerInformation signer,
+        byte[] signedBytes,
+        byte[] cmsBytes)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var attrs in EnumerateSignedAttributeEncodings(signer, cmsBytes))
+        {
+            if (attrs is { Length: > 0 } && seen.Add(Convert.ToHexString(attrs)))
+            {
+                yield return (attrs, true);
+            }
+        }
+
+        if (signedBytes.Length > 0)
+        {
+            yield return (signedBytes, false);
+        }
+    }
+
+    private static IEnumerable<byte[]> EnumerateSignedAttributeEncodings(SignerInformation signer, byte[] cmsBytes)
+    {
+        var original = ExtractOriginalSignedAttributesRaw(cmsBytes)
+                       ?? ExtractOriginalSignedAttributes(cmsBytes);
+        if (original is { Length: > 0 })
+        {
+            yield return original;
+        }
+
+        var encoded = GetEncodedSignedAttributes(signer);
+        if (encoded is { Length: > 0 })
+        {
+            yield return encoded;
         }
     }
 
@@ -208,6 +278,224 @@ internal static class OzdstCms
         }
 
         return null;
+    }
+
+    private static byte[]? ExtractOriginalSignedAttributesRaw(byte[] cmsBytes)
+    {
+        try
+        {
+            var data = DerUtil.Trim(cmsBytes);
+            var contentInfo = ReadTlv(data, 0);
+            if (contentInfo.Tag != 0x30)
+            {
+                return null;
+            }
+
+            var oid = ReadTlv(data, contentInfo.Value);
+            var wrapped = ReadTlv(data, oid.End);
+            if ((wrapped.Tag & 0xE0) != 0xA0)
+            {
+                return null;
+            }
+
+            var signedData = ReadTlv(data, wrapped.Value);
+            if (signedData.Tag != 0x30)
+            {
+                return null;
+            }
+
+            var offset = signedData.Value;
+            Tlv lastSet = default;
+            var foundSet = false;
+            while (offset < signedData.End)
+            {
+                var child = ReadTlv(data, offset);
+                if (child.Tag == 0x31)
+                {
+                    lastSet = child;
+                    foundSet = true;
+                }
+
+                offset = child.End;
+            }
+
+            if (!foundSet || lastSet.Length == 0)
+            {
+                return null;
+            }
+
+            var signerInfo = ReadTlv(data, lastSet.Value);
+            if (signerInfo.Tag != 0x30)
+            {
+                return null;
+            }
+
+            offset = signerInfo.Value;
+            Tlv signedAttrs = default;
+            var foundAttrs = false;
+            while (offset < signerInfo.End)
+            {
+                var child = ReadTlv(data, offset);
+                if (child.Tag == 0xA0)
+                {
+                    signedAttrs = child;
+                    foundAttrs = true;
+                }
+
+                offset = child.End;
+            }
+
+            if (!foundAttrs)
+            {
+                return null;
+            }
+
+            var encoded = new byte[signedAttrs.End - signedAttrs.Start];
+            Buffer.BlockCopy(data, signedAttrs.Start, encoded, 0, encoded.Length);
+            encoded[0] = 0x31;
+            return encoded;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private readonly struct Tlv
+    {
+        public Tlv(int tag, int start, int value, int length, int end)
+        {
+            Tag = tag;
+            Start = start;
+            Value = value;
+            Length = length;
+            End = end;
+        }
+
+        public int Tag { get; }
+        public int Start { get; }
+        public int Value { get; }
+        public int Length { get; }
+        public int End { get; }
+    }
+
+    private static Tlv ReadTlv(byte[] data, int offset)
+    {
+        var start = offset;
+        var tag = data[offset];
+        offset++;
+        if ((tag & 0x1F) == 0x1F)
+        {
+            while (offset < data.Length && (data[offset] & 0x80) != 0)
+            {
+                offset++;
+            }
+
+            offset++;
+        }
+
+        var lenByte = data[offset++];
+        int length;
+        if ((lenByte & 0x80) == 0)
+        {
+            length = lenByte;
+        }
+        else
+        {
+            var count = lenByte & 0x7F;
+            length = 0;
+            for (var i = 0; i < count; i++)
+            {
+                length = (length << 8) | data[offset++];
+            }
+        }
+
+        var value = offset;
+        return new Tlv(tag, start, value, length, value + length);
+    }
+
+    private static byte[]? ExtractOriginalSignedAttributes(byte[] cmsBytes)
+    {
+        try
+        {
+            var contentInfo = Asn1Sequence.GetInstance(DerUtil.Trim(cmsBytes));
+            if (contentInfo.Count < 2)
+            {
+                return null;
+            }
+
+            var signedData = ReadExplicitSequence(contentInfo[1]);
+            if (signedData is null)
+            {
+                return null;
+            }
+
+            Asn1Set? signerInfos = null;
+            for (var i = 0; i < signedData.Count; i++)
+            {
+                if (signedData[i] is Asn1Set set)
+                {
+                    signerInfos = set;
+                }
+            }
+
+            if (signerInfos is null || signerInfos.Count == 0)
+            {
+                return null;
+            }
+
+            var signerInfo = Asn1Sequence.GetInstance(signerInfos[0]);
+            Asn1TaggedObject? signedAttrs = null;
+            for (var i = 0; i < signerInfo.Count; i++)
+            {
+                if (signerInfo[i] is Asn1TaggedObject tagged && tagged.TagNo == 0)
+                {
+                    signedAttrs = tagged;
+                }
+            }
+
+            if (signedAttrs is null)
+            {
+                return null;
+            }
+
+            var encoded = signedAttrs.GetEncoded();
+            if (encoded.Length > 0 && encoded[0] == 0xA0)
+            {
+                encoded[0] = 0x31;
+            }
+
+            return encoded;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Asn1Sequence? ReadExplicitSequence(Asn1Encodable encoded)
+    {
+        try
+        {
+            if (encoded is Asn1Sequence sequence)
+            {
+                return sequence;
+            }
+
+            var tagged = Asn1TaggedObject.GetInstance(encoded);
+            try
+            {
+                return Asn1Sequence.GetInstance(tagged.GetExplicitBaseObject());
+            }
+            catch
+            {
+                return Asn1Sequence.GetInstance(tagged.GetBaseObject());
+            }
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool? MessageDigestMatches(SignerInformation signer, byte[] signedBytes)
@@ -239,7 +527,7 @@ internal static class OzdstCms
                 }
             }
 
-            return null;
+            return false;
         }
         catch
         {
@@ -251,17 +539,71 @@ internal static class OzdstCms
     {
         if (size is 32)
         {
-            yield return Digest(new Gost3411Digest(), data);
-            yield return Digest(new Gost3411_2012_256Digest(), data);
+            foreach (var hash in HashesOf(new Gost3411Digest(), data))
+            {
+                yield return hash;
+            }
+
+            foreach (var sbox in new[] { "Default", "E-A", "E-B", "E-C", "E-D" })
+            {
+                Org.BouncyCastle.Crypto.IDigest? digest = null;
+                try
+                {
+                    digest = new Gost3411Digest(Gost28147Engine.GetSBox(sbox));
+                }
+                catch
+                {
+                    // unknown S-box name in this BouncyCastle build
+                }
+
+                if (digest is null)
+                {
+                    continue;
+                }
+
+                foreach (var hash in HashesOf(digest, data))
+                {
+                    yield return hash;
+                }
+            }
+
+            foreach (var hash in HashesOf(new Gost3411_2012_256Digest(), data))
+            {
+                yield return hash;
+            }
         }
         else if (size is 64)
         {
-            yield return Digest(new Gost3411_2012_512Digest(), data);
+            foreach (var hash in HashesOf(new Gost3411_2012_512Digest(), data))
+            {
+                yield return hash;
+            }
         }
         else
         {
-            yield return Digest(new Gost3411Digest(), data);
+            foreach (var hash in HashesOf(new Gost3411Digest(), data))
+            {
+                yield return hash;
+            }
         }
+    }
+
+    private static IEnumerable<byte[]> HashesOf(Org.BouncyCastle.Crypto.IDigest digest, byte[] data)
+    {
+        var hash = Digest(digest, data);
+        yield return hash;
+        yield return Reverse(hash);
+    }
+
+    private static byte[] Reverse(byte[] data)
+    {
+        var copy = new byte[data.Length];
+        for (var i = 0; i < data.Length; i++)
+        {
+            copy[i] = data[data.Length - 1 - i];
+        }
+
+        return copy;
     }
 
     private static byte[] Digest(Org.BouncyCastle.Crypto.IDigest digest, byte[] data)
@@ -287,13 +629,13 @@ internal static class OzdstCms
         byte[] keyBytes;
         try
         {
-            keyBytes = spki.PublicKeyData.GetOctets();
+            keyBytes = UnwrapKeyBytes(spki.PublicKeyData.GetOctets());
         }
         catch
         {
             try
             {
-                keyBytes = spki.PublicKeyData.GetBytes();
+                keyBytes = UnwrapKeyBytes(spki.PublicKeyData.GetBytes());
             }
             catch
             {
@@ -315,7 +657,7 @@ internal static class OzdstCms
     {
         foreach (var oid in EnumerateParameterOids(spki))
         {
-            var named = ECGost3410NamedCurves.GetByOid(oid);
+            var named = ToDomain(ECGost3410NamedCurves.GetByOid(oid));
             if (named is not null)
             {
                 yield return named;
@@ -327,7 +669,7 @@ internal static class OzdstCms
             ECDomainParameters? named = null;
             try
             {
-                named = ECGost3410NamedCurves.GetByOid(oid);
+                named = ToDomain(ECGost3410NamedCurves.GetByOid(oid));
             }
             catch
             {
@@ -341,12 +683,22 @@ internal static class OzdstCms
         }
     }
 
-    private static IEnumerable<Asn1ObjectIdentifier> EnumerateParameterOids(SubjectPublicKeyInfo spki)
+    private static ECDomainParameters? ToDomain(X9ECParameters? x9)
+    {
+        if (x9 is null)
+        {
+            return null;
+        }
+
+        return new ECDomainParameters(x9.Curve, x9.G, x9.N, x9.H, x9.GetSeed());
+    }
+
+    private static IEnumerable<DerObjectIdentifier> EnumerateParameterOids(SubjectPublicKeyInfo spki)
     {
         Asn1Encodable? parameters;
         try
         {
-            parameters = spki.Algorithm.Parameters;
+            parameters = spki.AlgorithmID.Parameters;
         }
         catch
         {
@@ -358,27 +710,59 @@ internal static class OzdstCms
             yield break;
         }
 
-        if (parameters is Asn1ObjectIdentifier single)
+        if (parameters is DerObjectIdentifier single)
         {
             yield return single;
             yield break;
         }
 
+        Asn1Sequence? sequence;
         try
         {
-            var sequence = Asn1Sequence.GetInstance(parameters.ToAsn1Object());
-            for (var i = 0; i < sequence.Count; i++)
+            sequence = Asn1Sequence.GetInstance(parameters.ToAsn1Object());
+        }
+        catch
+        {
+            yield break;
+        }
+
+        if (sequence is null)
+        {
+            yield break;
+        }
+
+        for (var i = 0; i < sequence.Count; i++)
+        {
+            if (sequence[i] is DerObjectIdentifier oid)
             {
-                if (sequence[i] is Asn1ObjectIdentifier oid)
-                {
-                    yield return oid;
-                }
+                yield return oid;
+            }
+        }
+    }
+
+    private static byte[] UnwrapKeyBytes(byte[] keyBytes)
+    {
+        if (keyBytes.Length == 66 && keyBytes[0] == 0x04 && keyBytes[1] == 0x40)
+        {
+            var inner = new byte[64];
+            Buffer.BlockCopy(keyBytes, 2, inner, 0, 64);
+            return inner;
+        }
+
+        try
+        {
+            var octets = Asn1OctetString.GetInstance(keyBytes).GetOctets();
+            if (octets is { Length: 64 or 65 })
+            {
+                return octets;
             }
         }
         catch
         {
-            // not a sequence of OIDs
+            // already a raw point encoding
         }
+
+        return keyBytes;
     }
 
     private static ECPublicKeyParameters? TryEcKey(byte[] keyBytes, ECDomainParameters curve)
@@ -388,9 +772,8 @@ internal static class OzdstCms
             ECPoint? point = null;
             if (keyBytes.Length == 64)
             {
-                var x = UnsignedLe(keyBytes, 0, 32);
-                var y = UnsignedLe(keyBytes, 32, 32);
-                point = curve.Curve.CreatePoint(x, y);
+                point = TryCreatePoint(curve, UnsignedLe(keyBytes, 0, 32), UnsignedLe(keyBytes, 32, 32))
+                        ?? TryCreatePoint(curve, UnsignedBe(keyBytes, 0, 32), UnsignedBe(keyBytes, 32, 32));
             }
             else if (keyBytes.Length == 65 && keyBytes[0] == 0x04)
             {
@@ -414,6 +797,19 @@ internal static class OzdstCms
         }
     }
 
+    private static ECPoint? TryCreatePoint(ECDomainParameters curve, BigInteger x, BigInteger y)
+    {
+        try
+        {
+            var point = curve.Curve.CreatePoint(x, y);
+            return point.IsInfinity ? null : point;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static bool VerifyGostSignature(ECPublicKeyParameters key, byte[] data, byte[] signature)
     {
         if (signature.Length % 2 != 0 || signature.Length < 64)
@@ -428,7 +824,7 @@ internal static class OzdstCms
             {
                 try
                 {
-                    var gost = new ECGOST3410Signer();
+                    var gost = new ECGost3410Signer();
                     gost.Init(false, key);
                     if (gost.VerifySignature(hash, r, s))
                     {
@@ -449,7 +845,7 @@ internal static class OzdstCms
     {
         try
         {
-            var verifier = new Gost3410DigestSigner(new ECGOST3410Signer(), new Gost3411Digest());
+            var verifier = new Gost3410DigestSigner(new ECGost3410Signer(), new Gost3411Digest());
             verifier.Init(false, key);
             verifier.BlockUpdate(data, 0, data.Length);
             return verifier.VerifySignature(signature);

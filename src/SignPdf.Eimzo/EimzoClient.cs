@@ -256,7 +256,7 @@ public sealed class EimzoClient : IDisposable
             }
             catch (Exception)
             {
-                // Try the next arity; E-IMZO 6.x has no PKCS#7 info function at all.
+                // Try the next arity; some E-IMZO builds omit this function.
             }
         }
 

@@ -24,7 +24,7 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
         {
             if (info.FunctionMissing)
             {
-                return await VerifyWithoutPkcs7InfoAsync(data, pkcs7, chain, info.Reason, cancellationToken)
+                return await VerifyWithoutPkcs7InfoAsync(data, pkcs7, chain, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -68,7 +68,6 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
         byte[] data,
         byte[] pkcs7,
         CmsCertChain chain,
-        string eimzoReason,
         CancellationToken cancellationToken)
     {
         var local = CmsLocalInspect.Parse(pkcs7, data);
@@ -84,10 +83,6 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
             trustDetails,
             chain,
             localIntegrity: true);
-        if (!string.IsNullOrWhiteSpace(eimzoReason))
-        {
-            details += Environment.NewLine + Loc.T("pkcs7_no_api");
-        }
 
         return new CmsVerifyResult
         {
