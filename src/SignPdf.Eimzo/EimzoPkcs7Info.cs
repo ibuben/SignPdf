@@ -6,6 +6,7 @@ namespace SignPdf.Eimzo;
 public sealed class EimzoPkcs7Info
 {
     public bool Success { get; init; }
+    public bool FunctionMissing { get; init; }
     public string Reason { get; init; } = "";
     public bool? DigestValid { get; init; }
     public bool? CertificateVerified { get; init; }

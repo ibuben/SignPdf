@@ -22,6 +22,12 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
         var chain = CmsCertChain.Extract(pkcs7);
         if (!info.Success)
         {
+            if (info.FunctionMissing)
+            {
+                return await VerifyWithoutPkcs7InfoAsync(data, pkcs7, chain, info.Reason, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             return new CmsVerifyResult
             {
                 SignatureValid = null,
@@ -56,6 +62,61 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
             Details = details,
             Reason = SanitizeReason(info.Reason),
         };
+    }
+
+    private async Task<CmsVerifyResult> VerifyWithoutPkcs7InfoAsync(
+        byte[] data,
+        byte[] pkcs7,
+        CmsCertChain chain,
+        string eimzoReason,
+        CancellationToken cancellationToken)
+    {
+        var local = CmsLocalInspect.Parse(pkcs7, data);
+        var (trusted, trustDetails) = await ConfirmEimzoKeyAsync(
+                new EimzoPkcs7Info { Success = true },
+                chain,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var details = BuildDetails(
+            new EimzoPkcs7Info { Success = true, Reason = "" },
+            local.Integrity,
+            trusted,
+            trustDetails,
+            chain,
+            localIntegrity: true);
+        if (!string.IsNullOrWhiteSpace(eimzoReason))
+        {
+            details += Environment.NewLine + Loc.T("pkcs7_no_api");
+        }
+
+        return new CmsVerifyResult
+        {
+            SignatureValid = local.Integrity,
+            CertificateTrusted = trusted,
+            TrustDetails = trustDetails,
+            Subject = FirstNonEmpty(local.Subject, chain.Subjects.FirstOrDefault()),
+            Issuer = FirstNonEmpty(local.Issuer, chain.Issuers.FirstOrDefault()),
+            SignedAt = local.SignedAt,
+            NotBefore = local.NotBefore,
+            NotAfter = local.NotAfter,
+            Algorithm = local.Algorithm,
+            Source = "E-IMZO",
+            Details = details,
+            Reason = "",
+        };
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return "";
     }
 
     private async Task<(bool Trusted, string Details)> ConfirmEimzoKeyAsync(
@@ -140,12 +201,13 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
         bool? digestValid,
         bool trusted,
         string trustDetails,
-        CmsCertChain chain)
+        CmsCertChain chain,
+        bool localIntegrity = false)
     {
         var lines = new List<string>();
         if (digestValid == true)
         {
-            lines.Add(Loc.T("integrity_ok"));
+            lines.Add(localIntegrity ? Loc.T("integrity_ok_local") : Loc.T("integrity_ok"));
         }
         else if (digestValid == false)
         {
@@ -153,7 +215,7 @@ internal sealed class EimzoCmsVerifier : IPdfCmsVerifier
         }
         else
         {
-            lines.Add(Loc.T("integrity_unclear"));
+            lines.Add(localIntegrity ? Loc.T("integrity_unclear_local") : Loc.T("integrity_unclear"));
         }
 
         if (trusted)

@@ -22,6 +22,7 @@ public sealed class EimzoClient : IDisposable
     private bool _apiKeysInstalled;
     private bool _trustStoreTried;
     private string _trustStoreId = "";
+    private DetachedInfoArity _detachedInfoArity;
 
     public string? Endpoint => _capiws.WorkingUrl;
     public string? Version { get; private set; }
@@ -191,42 +192,104 @@ public sealed class EimzoClient : IDisposable
         ArgumentNullException.ThrowIfNull(data);
         ArgumentNullException.ThrowIfNull(pkcs7);
         await EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        await DiscoverDetachedInfoArityAsync(cancellationToken).ConfigureAwait(false);
+        if (_detachedInfoArity == DetachedInfoArity.Missing)
+        {
+            return FunctionMissingResult();
+        }
 
         var trustStoreId = await TryOpenTruststoreAsync(cancellationToken).ConfigureAwait(false);
         var data64 = Convert.ToBase64String(data);
         var pkcs764 = Convert.ToBase64String(TrimDer(pkcs7));
 
-        // E-IMZO 5.00 регистрирует метод с 3 аргументами; без tsid приходит «Функция не найдена».
-        JsonObject? response = null;
-        if (!string.IsNullOrWhiteSpace(trustStoreId))
+        JsonObject? last = null;
+        foreach (var arguments in BuildDetachedInfoCalls(data64, pkcs764, trustStoreId))
         {
-            response = await CallDetachedInfoAsync(data64, pkcs764, trustStoreId, cancellationToken)
+            last = await CallDetachedInfoAsync(arguments, SignTimeout, cancellationToken)
                 .ConfigureAwait(false);
-            if (IsSuccess(response))
+            if (IsSuccess(last))
             {
-                return EimzoPkcs7Info.FromResponse(response);
+                return EimzoPkcs7Info.FromResponse(last);
             }
-        }
 
-        response = await CallDetachedInfoAsync(data64, pkcs764, "", cancellationToken)
-            .ConfigureAwait(false);
-        if (!IsSuccess(response))
-        {
+            if (IsFunctionMissing(last))
+            {
+                continue;
+            }
+
             return new EimzoPkcs7Info
             {
                 Success = false,
-                Reason = ReadString(response, "reason") ?? "E-IMZO не смог разобрать PKCS#7.",
-                RawJson = response.ToJsonString(),
+                Reason = ReadString(last, "reason") ?? "E-IMZO не смог разобрать PKCS#7.",
+                RawJson = last.ToJsonString(),
             };
         }
 
-        return EimzoPkcs7Info.FromResponse(response);
+        _detachedInfoArity = DetachedInfoArity.Missing;
+        return FunctionMissingResult(last);
+    }
+
+    private async Task DiscoverDetachedInfoArityAsync(CancellationToken cancellationToken)
+    {
+        if (_detachedInfoArity != DetachedInfoArity.Unknown)
+        {
+            return;
+        }
+
+        const string probe = "MAA=";
+        foreach (var (kind, arguments) in new (DetachedInfoArity Kind, string[] Args)[]
+                 {
+                     (DetachedInfoArity.Args3, new[] { probe, probe, "" }),
+                     (DetachedInfoArity.Args2, new[] { probe, probe }),
+                     (DetachedInfoArity.Args4, new[] { probe, probe, "", "yes" }),
+                 })
+        {
+            try
+            {
+                var response = await CallDetachedInfoAsync(arguments, ShortTimeout, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!IsFunctionMissing(response))
+                {
+                    _detachedInfoArity = kind;
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                // Try the next arity; E-IMZO 6.x has no PKCS#7 info function at all.
+            }
+        }
+
+        _detachedInfoArity = DetachedInfoArity.Missing;
+    }
+
+    private IEnumerable<string[]> BuildDetachedInfoCalls(string data64, string pkcs764, string trustStoreId)
+    {
+        if (_detachedInfoArity is DetachedInfoArity.Args3 or DetachedInfoArity.Unknown)
+        {
+            if (!string.IsNullOrWhiteSpace(trustStoreId))
+            {
+                yield return new[] { data64, pkcs764, trustStoreId };
+            }
+
+            yield return new[] { data64, pkcs764, "" };
+        }
+
+        if (_detachedInfoArity is DetachedInfoArity.Args2 or DetachedInfoArity.Unknown)
+        {
+            yield return new[] { data64, pkcs764 };
+        }
+
+        if (_detachedInfoArity is DetachedInfoArity.Args4 or DetachedInfoArity.Unknown)
+        {
+            yield return new[] { data64, pkcs764, trustStoreId, "yes" };
+            yield return new[] { data64, pkcs764, "", "yes" };
+        }
     }
 
     private Task<JsonObject> CallDetachedInfoAsync(
-        string data64,
-        string pkcs764,
-        string trustStoreId,
+        string[] arguments,
+        TimeSpan timeout,
         CancellationToken cancellationToken)
     {
         return _capiws.CallAsync(
@@ -234,10 +297,46 @@ public sealed class EimzoClient : IDisposable
             {
                 plugin = "pkcs7",
                 name = "get_pkcs7_detached_info",
-                arguments = new[] { data64, pkcs764, trustStoreId },
+                arguments,
             },
-            SignTimeout,
+            timeout,
             cancellationToken);
+    }
+
+    private static EimzoPkcs7Info FunctionMissingResult(JsonObject? response = null)
+    {
+        return new EimzoPkcs7Info
+        {
+            Success = false,
+            FunctionMissing = true,
+            Reason = (response is null ? null : ReadString(response, "reason"))
+                     ?? "Функция не найдена или версия E-IMZO устарела. Обновите E-IMZO",
+            RawJson = response?.ToJsonString() ?? "",
+        };
+    }
+
+    internal static bool IsFunctionMissing(JsonObject response)
+    {
+        var reason = ReadString(response, "reason") ?? "";
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return false;
+        }
+
+        return reason.Contains("не найдена", StringComparison.OrdinalIgnoreCase)
+               || reason.Contains("not found", StringComparison.OrdinalIgnoreCase)
+               || reason.Contains("устарела", StringComparison.OrdinalIgnoreCase)
+               || reason.Contains("outdated", StringComparison.OrdinalIgnoreCase)
+               || reason.Contains("function.is.not.found", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private enum DetachedInfoArity
+    {
+        Unknown,
+        Args2,
+        Args3,
+        Args4,
+        Missing,
     }
 
     public async Task<bool> VerifyCertificateIssuedByAsync(

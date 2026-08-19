@@ -2,9 +2,6 @@ using System.Globalization;
 using System.Text;
 using iText.Kernel.Pdf;
 using iText.Signatures;
-using Org.BouncyCastle.Asn1.Pkcs;
-using Org.BouncyCastle.Cms;
-using BcX509 = Org.BouncyCastle.X509.X509Certificate;
 
 namespace SignPdf.Pdf;
 
@@ -293,99 +290,22 @@ public sealed class PdfVerifyService
 
     private static CmsInfo? TryParseCms(byte[] cmsBytes, byte[] signedBytes)
     {
-        if (cmsBytes.Length == 0)
+        var local = CmsLocalInspect.Parse(cmsBytes, signedBytes);
+        if (string.IsNullOrWhiteSpace(local.Subject)
+            && string.IsNullOrWhiteSpace(local.Algorithm)
+            && local.Integrity is null)
         {
             return null;
         }
 
-        CmsSignedData cms;
-        try
-        {
-            cms = signedBytes.Length > 0
-                ? new CmsSignedData(new CmsProcessableByteArray(signedBytes), DerUtil.Trim(cmsBytes))
-                : new CmsSignedData(DerUtil.Trim(cmsBytes));
-        }
-        catch
-        {
-            try
-            {
-                cms = new CmsSignedData(DerUtil.Trim(cmsBytes));
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        var signers = cms.GetSignerInfos().GetSigners();
-        SignerInformation? signer = null;
-        foreach (SignerInformation item in signers)
-        {
-            signer = item;
-            break;
-        }
-
-        BcX509? cert = null;
-        var store = cms.GetCertificates();
-        if (signer is not null)
-        {
-            foreach (BcX509 match in store.EnumerateMatches(signer.SignerID))
-            {
-                cert = match;
-                break;
-            }
-        }
-
-        if (cert is null)
-        {
-            foreach (BcX509 match in store.EnumerateMatches(null))
-            {
-                cert = match;
-                break;
-            }
-        }
-
-        bool? integrity = null;
-        if (signer is not null && cert is not null)
-        {
-            try
-            {
-                integrity = signer.Verify(cert);
-            }
-            catch
-            {
-                integrity = null;
-            }
-        }
-
-        DateTime? signedAt = null;
-        try
-        {
-            if (signer?.SignedAttributes is not null)
-            {
-                var attr = signer.SignedAttributes[PkcsObjectIdentifiers.Pkcs9AtSigningTime];
-                var first = attr?.AttrValues?[0];
-                if (first is not null)
-                {
-                    signedAt = DateTime.Parse(first.ToString()!);
-                }
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-
-        var algorithm = FirstNonEmpty(signer?.EncryptionAlgOid, signer?.DigestAlgOid);
-
         return new CmsInfo(
-            cert?.SubjectDN.ToString() ?? "",
-            cert?.IssuerDN.ToString() ?? "",
-            cert?.NotBefore,
-            cert?.NotAfter,
-            signedAt,
-            algorithm,
-            integrity);
+            local.Subject,
+            local.Issuer,
+            local.NotBefore,
+            local.NotAfter,
+            local.SignedAt,
+            local.Algorithm,
+            local.Integrity);
     }
 
     private static byte[] ReadByteRange(string filePath, PdfDictionary sigDict)
