@@ -3,8 +3,11 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using SignPdf.Pdf;
 
 namespace SignPdf.App;
@@ -25,6 +28,7 @@ public partial class PdfViewerWindow : Window
     private PdfTextIndex? _textIndex;
     private IReadOnlyList<PdfTextHit> _hits = Array.Empty<PdfTextHit>();
     private int _hitIndex = -1;
+    private bool _printing;
 
     public PdfViewerWindow(string filePath)
     {
@@ -50,6 +54,7 @@ public partial class PdfViewerWindow : Window
     {
         Title = Loc.T("viewer_title_file", Path.GetFileName(_filePath));
         FitWidthButton.Content = Loc.T("fit_width");
+        PrintButton.Content = Loc.T("print");
         SearchPlaceholder.Text = Loc.T("search_placeholder");
         UpdateSignatureButton();
         UpdateSearchCount();
@@ -99,6 +104,7 @@ public partial class PdfViewerWindow : Window
             }
 
             PageLabel.Text = Loc.T("pages", _document.PageCount);
+            PrintButton.IsEnabled = _document.PageCount > 0;
             SetStatus(ViewerStatusKind.Path, _filePath);
             _layoutReady = true;
             TryApplyFitWidth();
@@ -108,6 +114,7 @@ public partial class PdfViewerWindow : Window
         }
         catch (Exception ex)
         {
+            PrintButton.IsEnabled = false;
             SetStatus(ViewerStatusKind.OpenFail, ex.Message);
         }
     }
@@ -275,7 +282,146 @@ public partial class PdfViewerWindow : Window
             SearchBox.Focus();
             SearchBox.SelectAll();
             e.Handled = true;
+            return;
         }
+
+        if (e.Key == Key.P && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            e.Handled = true;
+            _ = PrintAsync();
+        }
+    }
+
+    private void PrintClick(object sender, RoutedEventArgs e) => _ = PrintAsync();
+
+    private async Task PrintAsync()
+    {
+        if (_document is null || _document.PageCount == 0 || _printing)
+        {
+            return;
+        }
+
+        var pageCount = (int)_document.PageCount;
+        var dialog = new PrintDialog
+        {
+            UserPageRangeEnabled = true,
+            MinPage = 1,
+            MaxPage = _document.PageCount,
+            PageRange = new PageRange(1, pageCount),
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var from = 1;
+        var to = pageCount;
+        if (dialog.PageRangeSelection == PageRangeSelection.UserPages)
+        {
+            from = Math.Clamp(dialog.PageRange.PageFrom, 1, pageCount);
+            to = Math.Clamp(dialog.PageRange.PageTo, from, pageCount);
+        }
+
+        var area = PrintableSize(dialog);
+        if (area.Width < 10 || area.Height < 10)
+        {
+            SetStatus(ViewerStatusKind.PrintFail, "");
+            return;
+        }
+
+        _printing = true;
+        PrintButton.IsEnabled = false;
+        SetStatus(ViewerStatusKind.Printing);
+        await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background);
+        try
+        {
+            var document = _document;
+            var dpi = PrinterDpi(dialog);
+            var sheets = new List<(BitmapSource Image, double Width, double Height)>(to - from + 1);
+            for (var number = from; number <= to; number++)
+            {
+                if (!IsLoaded || document is null)
+                {
+                    return;
+                }
+
+                var index = (uint)(number - 1);
+                var size = document.GetPageSize(index);
+                var fit = Math.Min(area.Width / size.Width, area.Height / size.Height);
+                if (fit <= 0 || double.IsNaN(fit) || double.IsInfinity(fit))
+                {
+                    fit = 1;
+                }
+
+                var image = await document.RenderPageAsync(index, fit * dpi / 96.0, CancellationToken.None);
+                sheets.Add((image, size.Width * fit, size.Height * fit));
+            }
+
+            if (!IsLoaded)
+            {
+                return;
+            }
+
+            dialog.PrintDocument(new PdfPrintPaginator(sheets, area), PdfPathNames.ForPrintJob(_filePath));
+            SetStatus(ViewerStatusKind.Path, _filePath);
+        }
+        catch (Exception ex)
+        {
+            if (IsLoaded)
+            {
+                SetStatus(ViewerStatusKind.PrintFail, ex.Message);
+            }
+        }
+        finally
+        {
+            _printing = false;
+            if (IsLoaded)
+            {
+                PrintButton.IsEnabled = _document is not null && _document.PageCount > 0;
+            }
+        }
+    }
+
+    private static Size PrintableSize(PrintDialog dialog)
+    {
+        if (dialog.PrintableAreaWidth >= 10 && dialog.PrintableAreaHeight >= 10)
+        {
+            return new Size(dialog.PrintableAreaWidth, dialog.PrintableAreaHeight);
+        }
+
+        try
+        {
+            var area = dialog.PrintQueue?.GetPrintCapabilities(dialog.PrintTicket)?.PageImageableArea;
+            if (area is not null && area.ExtentWidth >= 10 && area.ExtentHeight >= 10)
+            {
+                return new Size(area.ExtentWidth, area.ExtentHeight);
+            }
+        }
+        catch
+        {
+            // Some drivers do not report an imageable area.
+        }
+
+        return new Size(0, 0);
+    }
+
+    private static int PrinterDpi(PrintDialog dialog)
+    {
+        try
+        {
+            var resolution = dialog.PrintTicket?.PageResolution;
+            var dpi = resolution?.X ?? resolution?.Y;
+            if (dpi is >= 150 and <= 1200)
+            {
+                return dpi.Value;
+            }
+        }
+        catch
+        {
+            // Some drivers omit a numeric resolution.
+        }
+
+        return 300;
     }
 
     private void SearchTextChanged(object sender, TextChangedEventArgs e)
@@ -440,6 +586,10 @@ public partial class PdfViewerWindow : Window
             ViewerStatusKind.Opening => Loc.T("opening"),
             ViewerStatusKind.OpenFail => Loc.T("open_fail", _statusArg),
             ViewerStatusKind.RenderFail => Loc.T("render_fail", _statusArg),
+            ViewerStatusKind.Printing => Loc.T("printing"),
+            ViewerStatusKind.PrintFail => string.IsNullOrEmpty(_statusArg)
+                ? Loc.T("print_no_area")
+                : Loc.T("print_fail", _statusArg),
             ViewerStatusKind.PageOf => SplitPageOf(_statusArg),
             _ => string.IsNullOrWhiteSpace(_statusArg) ? Loc.T("opening") : _statusArg,
         };
@@ -462,6 +612,45 @@ public partial class PdfViewerWindow : Window
         OpenFail,
         RenderFail,
         PageOf,
+        Printing,
+        PrintFail,
+    }
+}
+
+internal sealed class PdfPrintPaginator : DocumentPaginator, IDocumentPaginatorSource
+{
+    private readonly IReadOnlyList<(BitmapSource Image, double Width, double Height)> _pages;
+
+    public PdfPrintPaginator(IReadOnlyList<(BitmapSource Image, double Width, double Height)> pages, Size pageSize)
+    {
+        _pages = pages;
+        PageSize = pageSize;
+    }
+
+    public override bool IsPageCountValid => true;
+
+    public override int PageCount => _pages.Count;
+
+    public override Size PageSize { get; set; }
+
+    public override IDocumentPaginatorSource Source => this;
+
+    DocumentPaginator IDocumentPaginatorSource.DocumentPaginator => this;
+
+    public override DocumentPage GetPage(int pageNumber)
+    {
+        var (image, width, height) = _pages[pageNumber];
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            var x = (PageSize.Width - width) / 2;
+            var y = (PageSize.Height - height) / 2;
+            dc.DrawRectangle(Brushes.White, null, new Rect(new Point(0, 0), PageSize));
+            dc.DrawImage(image, new Rect(x, y, width, height));
+        }
+
+        var bounds = new Rect(new Point(0, 0), PageSize);
+        return new DocumentPage(visual, PageSize, bounds, bounds);
     }
 }
 

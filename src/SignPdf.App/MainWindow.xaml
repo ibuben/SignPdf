@@ -183,7 +183,18 @@
                                 <Button Margin="0,20,0,0" HorizontalAlignment="Left" MinWidth="160"
                                         Content="{local:Loc sign}" Command="{Binding SignCommand}"/>
 
-                                <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" Text="{Binding SignMessage}"/>
+                                <TextBlock Margin="0,14,0,0" TextWrapping="Wrap" Text="{Binding SignMessage}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SignMessageIsError}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
                 </ScrollViewer>
                 <Border x:Name="SignDropOverlay" Visibility="Collapsed" IsHitTestVisible="False"

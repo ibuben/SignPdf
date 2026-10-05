@@ -14,6 +14,12 @@ internal static class PdfFileAssociation
 
     public static string? FindPdfPath(IReadOnlyList<string> args)
     {
+        var fromCommandLine = PathAfterSingleArgument(Environment.CommandLine);
+        if (fromCommandLine is not null)
+        {
+            return File.Exists(fromCommandLine) ? Path.GetFullPath(fromCommandLine) : null;
+        }
+
         foreach (var raw in args)
         {
             if (string.IsNullOrWhiteSpace(raw) || raw.StartsWith('-'))
@@ -33,6 +39,24 @@ internal static class PdfFileAssociation
         return null;
     }
 
+    private static string? PathAfterSingleArgument(string commandLine)
+    {
+        const string token = " --single-argument ";
+        var at = commandLine.IndexOf(token, StringComparison.Ordinal);
+        if (at < 0)
+        {
+            return null;
+        }
+
+        var tail = commandLine[(at + token.Length)..].Trim();
+        if (tail.Length >= 2 && tail[0] == '"' && tail[^1] == '"')
+        {
+            tail = tail[1..^1];
+        }
+
+        return tail.Length == 0 ? null : tail;
+    }
+
     public static void Register()
     {
         var exe = Environment.ProcessPath;
@@ -41,7 +65,7 @@ internal static class PdfFileAssociation
             return;
         }
 
-        var command = $"\"{exe}\" \"%1\"";
+        var command = $"\"{exe}\" --single-argument \"%1\"";
         var appIcon = $"\"{exe}\",0";
         var fileIcon = $"\"{EnsurePdfIcon()}\"";
 

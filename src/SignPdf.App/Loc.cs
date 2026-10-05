@@ -66,7 +66,23 @@ public sealed class Loc : INotifyPropertyChanged
             return T("pdf_missing");
         }
 
+        if (IsNonAsciiPassword(current.Message))
+        {
+            return T("password_bad_chars");
+        }
+
         return current.Message;
+    }
+
+    internal static bool IsNonAsciiPassword(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("password", StringComparison.OrdinalIgnoreCase)
+               && message.Contains("not ascii", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Load()

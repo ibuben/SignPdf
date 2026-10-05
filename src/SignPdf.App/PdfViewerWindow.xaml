@@ -38,7 +38,9 @@
                     <TextBlock x:Name="ZoomLabel" Width="56" Text="100%" TextAlignment="Center"
                                VerticalAlignment="Center" Margin="6,0"/>
                     <Button Style="{StaticResource GhostButton}" Content="+" Width="36" Padding="0,6" Click="ZoomInClick" Margin="0,0,8,0"/>
-                    <Button x:Name="FitWidthButton" Style="{StaticResource GhostButton}" Content="{local:Loc fit_width}" Click="FitWidthClick" Margin="0,0,12,0"/>
+                    <Button x:Name="FitWidthButton" Style="{StaticResource GhostButton}" Content="{local:Loc fit_width}" Click="FitWidthClick" Margin="0,0,8,0"/>
+                    <Button x:Name="PrintButton" Style="{StaticResource GhostButton}" Content="{local:Loc print}"
+                            Click="PrintClick" IsEnabled="False" Margin="0,0,12,0" ToolTip="Ctrl+P"/>
                     <Button Style="{StaticResource GhostButton}" Width="28" Height="28" Padding="0" Margin="0,0,12,0"
                             Click="ThemeClick"
                             ToolTip="{Binding Source={x:Static local:Theme.Instance}, Path=ToggleHint}">

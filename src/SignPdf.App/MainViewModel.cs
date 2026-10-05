@@ -25,6 +25,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _showStamp = true;
     private bool _isBusy;
     private string _signMessage = "";
+    private bool _signMessageIsError;
     private string _verifyPdfPath = "";
     private string _verifySummary = "";
     private bool _hasVerificationResults;
@@ -148,6 +149,12 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _signMessage, value);
     }
 
+    public bool SignMessageIsError
+    {
+        get => _signMessageIsError;
+        private set => SetProperty(ref _signMessageIsError, value);
+    }
+
     public string VerifyPdfPath
     {
         get => _verifyPdfPath;
@@ -199,6 +206,7 @@ public sealed class MainViewModel : ObservableObject
     {
         IsBusy = true;
         SignMessage = "";
+        SignMessageIsError = false;
         try
         {
             SetEimzoStatus(EimzoUiKind.Connecting);
@@ -240,7 +248,7 @@ public sealed class MainViewModel : ObservableObject
         };
         if (dialog.ShowDialog() == true)
         {
-            PdfPath = dialog.FileName;
+            PdfPath = PdfPathNames.PreferExistingPdf(dialog.FileName);
         }
 
         return Task.CompletedTask;
@@ -265,7 +273,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (!string.IsNullOrWhiteSpace(suggested))
         {
-            dialog.FileName = Path.GetFileName(suggested);
+            dialog.FileName = PdfPathNames.ForDialog(suggested);
             var dir = Path.GetDirectoryName(suggested);
             if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
             {
@@ -290,7 +298,7 @@ public sealed class MainViewModel : ObservableObject
         };
         if (dialog.ShowDialog() == true)
         {
-            VerifyPdfPath = dialog.FileName;
+            VerifyPdfPath = PdfPathNames.PreferExistingPdf(dialog.FileName);
         }
 
         return Task.CompletedTask;
@@ -335,6 +343,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         IsBusy = true;
+        SignMessageIsError = false;
         SignMessage = Loc.T("loading_key");
         string? keyId = null;
         try
@@ -381,6 +390,7 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            SignMessageIsError = true;
             SignMessage = Loc.FromException(ex);
         }
         finally
